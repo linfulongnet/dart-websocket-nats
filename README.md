@@ -1,12 +1,16 @@
 
 # nats-dart
-NATS client to usage in Dart CLI, Web and Flutter projects
+### NATS client to usage in Dart CLI, Web and Flutter projects
+### Use `WebSocket` proxy `NATS` message, the `server` must be has WebSocket connection 
+#
 
 ### Setting up a client
 Setting up a client and firing up a connection
 ```dart
 var client = NatsClient('ws://demo.host:port/path');
 await client.connect();
+...
+await client.close();
 ```
 
 ### Publishing a message
@@ -22,13 +26,13 @@ client.publish("sub-id", "foo", replyTo: "bar");
 ### Subscribing to messages
 To subscribe to a topic, specify the topic and optionally, a queue group
 ```dart
-var messageStream = client.subscribe("sub-id", "foo");
+var subStream = client.subscribe("sub-id", "foo");
 
 // If more than one subscriber uses the same queue group,
 // only one will receive the message
-var messageStream = client.subscribe("sub-id", "foo", queueGroup: "group-1");
+var subStream = client.subscribe("sub-id", "foo", queueGroup: "group-1");
 
-messageStream.listen((message) {
+subStream.listen((message) {
     // Do something awesome
 });
 ```
