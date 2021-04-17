@@ -9,4 +9,4 @@ dependencies:
   test: any
   mockito: any
   web_socket_channel: ^2.0.0
-  logger: ^1.0.0
+  logging: ^1.0.1
