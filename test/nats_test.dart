@@ -7,30 +7,24 @@ import '../lib/src/crypto.dart';
 import '../lib/src/webSocketStatus.dart';
 
 void main() async {
+  String _url = 'ws://t2.bfdx.net:2235/nats';
+
   group('[Test WebSocket NATS]:', () {
     test('Connect', () async {
-      var client1 = NatsClient('ws://t2.bfdx.net:2235/nats');
-      await client1.connect();
+      var client = NatsClient(_url);
+      await client.connect();
 
-      client1.log.info("client1 connected: ${client1.serverinfo.toJson()}");
-      expect(client1.status, WebSocketStatus.OPEN);
+      client.log.info("client1 connected: ${client.serverinfo.toJson()}");
+      expect(client.status, WebSocketStatus.OPEN);
 
-      await client1.close();
-      expect(client1.status, WebSocketStatus.CLOSED);
-
-      var client2 = NatsClient('ws://t2.bfdx.net:2235/nats');
-      await client2.connect();
-      client2.log.info("client2 connected: ${client2.serverinfo.toJson()}");
-      expect(client2.status, WebSocketStatus.OPEN);
-
-      await client2.close();
-      expect(client2.status, WebSocketStatus.CLOSED);
+      await client.close();
+      expect(client.status, WebSocketStatus.CLOSED);
     });
 
     test("Pub & Sub", () async {
-      var client1 = NatsClient('ws://t2.bfdx.net:2235/nats');
+      var client1 = NatsClient(_url);
       await client1.connect();
-      var client2 = NatsClient('ws://t2.bfdx.net:2235/nats');
+      var client2 = NatsClient(_url);
       await client2.connect();
 
       int maxTestCount = 10;
