@@ -1,4 +1,4 @@
-import 'package:nats/nats.dart';
+import "package:dart_websocket_nats/nats.dart";
 
 import '../lib/src/crypto.dart';
 

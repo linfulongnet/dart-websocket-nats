@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import "package:test/test.dart";
-import "package:nats/nats.dart";
+import "package:dart_websocket_nats/nats.dart";
 
 import '../lib/src/crypto.dart';
 import '../lib/src/webSocketStatus.dart';
@@ -30,7 +30,6 @@ void main() async {
       int maxTestCount = 10;
       int count = 1;
       int receivedCount = 0;
-      Duration pubInterval = Duration(milliseconds: 500);
 
       client1.subscribe("sub-1").listen((msg) {
         receivedCount++;
@@ -49,10 +48,11 @@ void main() async {
       while (count <= maxTestCount) {
         client2.publish("sub-1", encodeBase64Str("foo-${count++}"),
             replyTo: 'sub-1-reply');
-        await Future.delayed(pubInterval);
+        await Future.delayed(Duration(milliseconds: 500));
       }
 
       expect(receivedCount, maxTestCount);
+      await Future.delayed(Duration(seconds: 2));
     });
   });
 }
