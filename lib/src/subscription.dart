@@ -3,5 +3,5 @@ class Subscription {
   String subject;
   String? queueGroup;
 
-  Subscription(this.sid,this.subject,{this.queueGroup});
+  Subscription(this.sid, this.subject, {this.queueGroup});
 }

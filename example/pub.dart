@@ -1,15 +1,17 @@
 import 'package:nats/nats.dart';
 
+import '../lib/src/crypto.dart';
+
 void main() async {
   var client = NatsClient('ws://localhost:9876/nats');
-
   await client.connect();
 
-  client.log.v("[pub.dart] connected: ${client.serverinfo.toJson()}");
+  client.log.info("[pub.dart] connected: ${client.serverinfo.toJson()}");
 
   client.subscribe("sub-1-reply", queueGroup: "foo.*").listen((msg) {
-    client.log.v("Got sub-1-reply message: ${msg.payload}");
+    client.log
+        .info("Got sub-1-reply message: ${decodeBase64Str(msg.payload!)}");
   });
 
-  client.publish("Hello world", "foo", replyTo: 'sub-1-reply');
+  client.publish("sub-1", encodeBase64Str("foo"), replyTo: 'sub-1-reply');
 }
