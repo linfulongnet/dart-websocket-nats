@@ -2,11 +2,12 @@ name: dart_websocket_nats
 version: 0.1.0
 description: NATS client for Dart language, use WebSocket proxy NATS message
 author: Linfulong <1126101262@qq.com>
+repository: https://github.com/linfulongnet/dart-websocket-nats
 environment:
   sdk: '>=2.12.0 <3.0.0'
 
 dependencies:
-  test: any
-  mockito: any
+  test: ^1.16.8
+  mockito: ^5.0.4
   web_socket_channel: ^2.0.0
   logging: ^1.0.1
