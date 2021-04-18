@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:logging/logging.dart';
 import "package:test/test.dart";
 import 'package:dart_websocket_nats/dart_websocket_nats.dart';
 
@@ -11,10 +12,10 @@ void main() async {
 
   group('[Test WebSocket NATS]:', () {
     test('Connect', () async {
-      var client = NatsClient(_url);
+      var client = NatsClient(_url, logLevel: Level.INFO);
       await client.connect();
 
-      client.log.info("client1 connected: ${client.serverinfo.toJson()}");
+      client.log.info("client connected: ${client.serverinfo.toJson()}");
       expect(client.status, WebSocketStatus.OPEN);
 
       await client.close();
@@ -48,7 +49,7 @@ void main() async {
       while (count <= maxTestCount) {
         client2.publish("sub-1", encodeBase64Str("foo-${count++}"),
             replyTo: 'sub-1-reply');
-        await Future.delayed(Duration(milliseconds: 500));
+        await Future.delayed(Duration(milliseconds: 300));
       }
 
       expect(receivedCount, maxTestCount);

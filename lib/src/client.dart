@@ -61,7 +61,12 @@ class NatsClient {
   int _socketStatus = WebSocketStatus.CLOSED;
   int get status => _socketStatus;
 
-  NatsClient(String url, {Level logLevel = Level.INFO}) {
+  // 记录ping失败次数，达到最大次数(Config.DEFAULT_MAX_PING_OUT)则断开连接，重新连接websocket
+  int _pingOutCount = 0;
+  late Completer _pingCompleter;
+  DateTime _lastReceivedTime = DateTime.now();
+
+  NatsClient(String url, {Level logLevel = Level.SEVERE}) {
     _url = url;
     _serverInfo = ServerInfo();
     _subscriptions = <Subscription>[];
@@ -88,6 +93,7 @@ class NatsClient {
       Map<String, dynamic>? headers,
       Duration? pingInterval,
       ConnectionOptions? connectionOptions}) {
+    log.config('NATS server connecting...');
     _connectCompleter = Completer();
     _socketStatus = WebSocketStatus.CONNECTING;
 
@@ -101,6 +107,9 @@ class NatsClient {
     _socketStatus = WebSocketStatus.OPEN;
 
     _channel.stream.listen((message) {
+      log.finest('_channel received message: $message');
+      // 记录接收到数据的时间
+      _lastReceivedTime = DateTime.now();
       _loopProcess(message);
     });
 
@@ -111,34 +120,43 @@ class NatsClient {
     if (message.startsWith(Config.MSG)) {
       _convertToMessages(message)
           .forEach((msg) => _messagesController.add(msg));
+    } else if (message.startsWith(Config.PING)) {
+      _sendPong();
+    } else if (message.startsWith(Config.PONG)) {
+      _receivedPong();
     } else if (message.startsWith(Config.OK)) {
       log.info("Received server OK");
-    } else if (message.startsWith(Config.PING)) {
-      _sendPing();
-    } else if (message.startsWith(Config.PONG)) {
-      Future.delayed(Duration(seconds: 5 /* Config.DEFAULT_PING_INTERVAL */),
-          () {
-        _sendPing();
-      });
     } else if (message.startsWith(Config.ERR)) {
-      _socketStatus = WebSocketStatus.CLOSING;
-      _channel.sink.close(SocketChannelStatus.unsupportedData);
-      _socketStatus = WebSocketStatus.CLOSED;
-      _reconnect();
+      _receivedErrorMessage();
     } else if (message.startsWith(Config.INFO)) {
       _serverInfo.fromJson(message.replaceFirst(Config.INFO, ""));
       _sendConnection(_connectionOptions);
       _connectCompleter.complete();
+      _initHeartbeat();
     } else {
       log.warning('Unknow message => $message');
     }
   }
 
+  void _resetBeforeConnectProps() {
+    _pingOutCount = 0;
+  }
+
   _reconnect() async {
+    log.warning('NATS server reconect');
+    // 重置连接前的一些参数
+    _resetBeforeConnectProps();
     await Future.delayed(Duration(seconds: Config.DEFAULT_RECONNECT_TIME_WAIT));
     await connect();
     // 将上个socket连接的订阅事件，重新订阅
     _carryOverSubscriptions();
+  }
+
+  _receivedErrorMessage() async {
+    _socketStatus = WebSocketStatus.CLOSING;
+    await _channel.sink.close(SocketChannelStatus.unsupportedData);
+    _socketStatus = WebSocketStatus.CLOSED;
+    _reconnect();
   }
 
   Message _convertToMessage(String message) {
@@ -166,6 +184,7 @@ class NatsClient {
 
   /// Carries over [Subscription] objects from one host to another during cluster rearrangement
   void _carryOverSubscriptions() {
+    log.finest('_carryOverSubscriptions: $_subscriptions');
     _subscriptions.forEach((sub) {
       _doSubscribe(sub);
     });
@@ -173,7 +192,7 @@ class NatsClient {
 
   void _add(String msg) {
     // ignore: unnecessary_null_comparison
-    if (_channel.sink == null) {
+    if (_socketStatus != WebSocketStatus.OPEN || _channel.sink == null) {
       _socketStatus = WebSocketStatus.CLOSED;
       log.severe(
           "Socket not ready. Please check if NatsClient.connect() is called");
@@ -261,16 +280,77 @@ class NatsClient {
   }
 
   void _sendPing() {
+    _pingCompleter = Completer();
     _add("${Config.PING}${Config.CR_LF}");
+  }
+
+  Future _checkPing(
+      {int awaitPingInterval = Config.DEFAULT_PING_INTERVAL}) async {
+    // 在下轮发送ping命令前，先检测是否达到失联最大次数，如果是，则断开websocket并重连
+    await Future.delayed(Duration(milliseconds: awaitPingInterval));
+    log.finest('_checkPing: _lastReceivedTime=$_lastReceivedTime');
+
+    if (_pingOutCount >= Config.DEFAULT_MAX_PING_OUT) {
+      log.severe('_checkPing: ${Config.MAX_PING_TIMEOUT_LIMIT}');
+      await close(
+          closeCode: SocketChannelStatus.noStatusReceived,
+          closeReason: Config.MAX_PING_TIMEOUT_LIMIT);
+      _reconnect();
+      return;
+    }
+
+    // 如果上次收到NATS服务器的消息，则说明socket连接一直存活
+    DateTime _now = DateTime.now();
+    DateTime _t =
+        _now.subtract(Duration(milliseconds: Config.DEFAULT_PING_INTERVAL));
+    var nextPingTime = Config.DEFAULT_PING_INTERVAL;
+    // 在ping周期内有数据
+    if (_lastReceivedTime.isAfter(_t)) {
+      if (_pingCompleter.isCompleted) {
+        _pingOutCount = 0;
+      } else {
+        _receivedPong();
+      }
+      // 重新计算下轮ping命令的间隔时间
+      nextPingTime = _lastReceivedTime
+              .add(Duration(milliseconds: Config.DEFAULT_PING_INTERVAL))
+              .millisecondsSinceEpoch -
+          _now.millisecondsSinceEpoch;
+    } else {
+      // 没有收到NATS服务器的消息，则计算ping失联次数
+      _pingOutCount++;
+    }
+
+    await Future.delayed(Duration(milliseconds: nextPingTime));
+
+    _sendPing();
+    _checkPing();
+  }
+
+  void _initHeartbeat() {
+    log.finest('_initHeartbeat');
+    // first ping
+    _sendPing();
+    // auto ping
+    _checkPing();
+  }
+
+  void _receivedPong() {
+    if (!_pingCompleter.isCompleted) {
+      _pingCompleter.complete();
+    }
+    // 需要重置ping失败的计数器
+    _pingOutCount = 0;
   }
 
   void _sendConnection(ConnectionOptions opts) {
     var connectStr = '${Config.CONNECT}${opts.toJson()}${Config.CR_LF}';
     _add(connectStr);
-    _sendPing();
   }
 
   Future close({int? closeCode, String? closeReason}) {
+    log.finest(
+        'NATS server close: closeCode=$closeCode, closeReason=$closeReason');
     _socketStatus = WebSocketStatus.CLOSED;
     return _channel.sink.close(closeCode, closeReason);
   }
