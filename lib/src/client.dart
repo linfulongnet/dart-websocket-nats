@@ -46,8 +46,6 @@ class NatsClient {
   Iterable<String>? _protocols;
   // ignore: unused_field
   Map<String, dynamic>? _headers;
-  // ignore: unused_field
-  Duration? _pingInterval;
   ConnectionOptions _connectionOptions = ConnectionOptions(
     verbose: false,
     pedantic: true,
@@ -66,8 +64,24 @@ class NatsClient {
   late Completer _pingCompleter;
   DateTime _lastReceivedTime = DateTime.now();
 
-  NatsClient(String url, {Level logLevel = Level.SEVERE}) {
+  late int _pingInterval;
+  late int _maxPingOut;
+  late int _reconectTimeWait;
+  late int _reconectTries;
+  int _reconnectCount = 0;
+
+  NatsClient(String url,
+      {Level logLevel = Level.SEVERE,
+      int pingInterval = Config.DEFAULT_PING_INTERVAL,
+      int maxPingOut = Config.DEFAULT_MAX_PING_OUT,
+      int reconectTimeWait = Config.DEFAULT_RECONNECT_TIME_WAIT,
+      int reconectTries = Config.DEFAULT_MAX_RECONNECT_ATTEMPTS}) {
     _url = url;
+    _pingInterval = pingInterval;
+    _maxPingOut = maxPingOut;
+    _reconectTimeWait = reconectTimeWait;
+    reconectTries = reconectTries;
+
     _serverInfo = ServerInfo();
     _subscriptions = <Subscription>[];
     _messagesController = new StreamController.broadcast();
@@ -91,7 +105,6 @@ class NatsClient {
   Future<void> connect(
       {Iterable<String>? protocols,
       Map<String, dynamic>? headers,
-      Duration? pingInterval,
       ConnectionOptions? connectionOptions}) {
     log.config('NATS server connecting...');
     _connectCompleter = Completer();
@@ -99,11 +112,12 @@ class NatsClient {
 
     if (protocols != null) _protocols = protocols;
     if (headers != null) _headers = headers;
-    if (pingInterval != null) _pingInterval = pingInterval;
     if (connectionOptions != null) _connectionOptions = connectionOptions;
 
     _channel = IOWebSocketChannel.connect(_url,
-        protocols: protocols, headers: headers, pingInterval: pingInterval);
+        protocols: protocols,
+        headers: headers,
+        pingInterval: Duration(milliseconds: _pingInterval));
     _socketStatus = WebSocketStatus.OPEN;
 
     _channel.stream.listen((message) {
@@ -143,10 +157,11 @@ class NatsClient {
   }
 
   _reconnect() async {
+    if (_reconnectCount++ >= _reconectTries) return;
     log.warning('NATS server reconect');
     // 重置连接前的一些参数
     _resetBeforeConnectProps();
-    await Future.delayed(Duration(seconds: Config.DEFAULT_RECONNECT_TIME_WAIT));
+    await Future.delayed(Duration(milliseconds: _reconectTimeWait));
     await connect();
     // 将上个socket连接的订阅事件，重新订阅
     _carryOverSubscriptions();
@@ -284,13 +299,12 @@ class NatsClient {
     _add("${Config.PING}${Config.CR_LF}");
   }
 
-  Future _checkPing(
-      {int awaitPingInterval = Config.DEFAULT_PING_INTERVAL}) async {
+  Future _checkPing() async {
     // 在下轮发送ping命令前，先检测是否达到失联最大次数，如果是，则断开websocket并重连
-    await Future.delayed(Duration(milliseconds: awaitPingInterval));
+    await Future.delayed(Duration(milliseconds: _pingInterval));
     log.finest('_checkPing: _lastReceivedTime=$_lastReceivedTime');
 
-    if (_pingOutCount >= Config.DEFAULT_MAX_PING_OUT) {
+    if (_pingOutCount >= _maxPingOut) {
       log.severe('_checkPing: ${Config.MAX_PING_TIMEOUT_LIMIT}');
       await close(
           closeCode: SocketChannelStatus.noStatusReceived,
@@ -301,27 +315,20 @@ class NatsClient {
 
     // 如果上次收到NATS服务器的消息，则说明socket连接一直存活
     DateTime _now = DateTime.now();
-    DateTime _t =
-        _now.subtract(Duration(milliseconds: Config.DEFAULT_PING_INTERVAL));
-    var nextPingTime = Config.DEFAULT_PING_INTERVAL;
+    DateTime _t = _now.subtract(Duration(milliseconds: _pingInterval));
     // 在ping周期内有数据
     if (_lastReceivedTime.isAfter(_t)) {
-      if (_pingCompleter.isCompleted) {
-        _pingOutCount = 0;
-      } else {
-        _receivedPong();
-      }
+      _receivedPong();
       // 重新计算下轮ping命令的间隔时间
-      nextPingTime = _lastReceivedTime
-              .add(Duration(milliseconds: Config.DEFAULT_PING_INTERVAL))
+      var nextPingTime = _lastReceivedTime
+              .add(Duration(milliseconds: _pingInterval))
               .millisecondsSinceEpoch -
           _now.millisecondsSinceEpoch;
+      await Future.delayed(Duration(milliseconds: nextPingTime));
     } else {
       // 没有收到NATS服务器的消息，则计算ping失联次数
       _pingOutCount++;
     }
-
-    await Future.delayed(Duration(milliseconds: nextPingTime));
 
     _sendPing();
     _checkPing();

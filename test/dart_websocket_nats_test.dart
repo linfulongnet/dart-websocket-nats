@@ -12,12 +12,14 @@ void main() async {
 
   group('[Test WebSocket NATS]:', () {
     test('Connect', () async {
-      var client = NatsClient(_url, logLevel: Level.INFO);
+      var client = NatsClient(_url,
+          logLevel: Level.ALL, pingInterval: 3 * 1000, maxPingOut: 5);
       await client.connect();
 
       client.log.info("client connected: ${client.serverinfo.toJson()}");
       expect(client.status, WebSocketStatus.OPEN);
 
+      await Future.delayed(Duration(seconds: 18));
       await client.close();
       expect(client.status, WebSocketStatus.CLOSED);
     });
