@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'serverInfo.dart';
+import 'util.dart';
 
 /// Options for establishing server connection
 class ConnectionOptions {
@@ -88,15 +89,6 @@ class ConnectionOptions {
     map["protocol"] = protocol;
     map["echo"] = echo;
 
-    return jsonEncode(_removeJsonNull(map));
+    return jsonEncode(removeJsonNull(map));
   }
-}
-
-Map<String, dynamic> _removeJsonNull(Map<String, dynamic> map) {
-  Map<String, dynamic> data = {};
-  map.forEach((key, value) {
-    if (value != null) data[key] = value;
-  });
-
-  return data;
 }
